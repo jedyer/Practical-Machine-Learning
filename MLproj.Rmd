@@ -1,0 +1,103 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Jason Dyer"
+date: "June 7, 2019"
+output: html_document
+---
+
+##Executive Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively.  One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. This project will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict how well the participants do the exercise.  
+
+The dataset was trained on three models: Random forest, support sector machine, and  stochastic gradient boost. Random Forest and support vector machine were trained on 5-fold crossvalidation and used parallel processing to reduce processing time.  Random Forest was found to have the highest accuracy on the test set and will be used to preduct how well participants perform the exercise.
+
+###Load libraries
+```{r, echo=TRUE,message=FALSE, cache=TRUE}
+pacman::p_load(caret,ggplot2,rpart,parallel,doParallel)
+```
+
+###Download training and test sets
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE,cache=TRUE}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+```
+
+###Read in files
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE,cache=TRUE}
+trainD<-read.csv("pml-training.csv",na.strings=c("NA","DIV/0!"))
+testD<-read.csv("pml-testing.csv",na.strings=c("NA","DIV/0!"))
+```
+
+##Preprocessing
+
+The training set contains 160 variables. The number of variables are reduced first by only including the predictor and sensor variables and then only keeping the remaining variables that do not contain NA or missing values. 
+
+###Limit datasets to the predictor and sensor columns
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE, cache=TRUE}
+training01<-trainD[,grepl("forearm|belt|dumbbell|arm|classe",names(trainD))]
+test01<-testD[,grepl("forearm|belt|dumbbell|arm|classe",names(testD))]
+```
+
+###Remove columns with NA or empty values
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE, cache=TRUE}
+training02<-training01[which(colSums(is.na(training01)| training01=="")==0)]
+test02<-test01[which(colSums(is.na(test01)| test01=="")==0)]
+```
+
+##Model Building
+ 
+The test set given is the final validation set.  I split the current training set into training and test set for model training.  Parallel processing was setup do reduce processing time.
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+set.seed(33833)
+trainIndex<-createDataPartition(y=training02$classe,p=0.75,list=FALSE)
+training<-training02[trainIndex,]
+test<-training02[-trainIndex,]
+```
+
+###Configure parallel processing
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE} 
+cluster<-makeCluster(detectCores()-1)
+registerDoParallel(cluster)
+fitControl<-trainControl(method="cv",number=5,allowParallel=TRUE,preProcOptions = list(thresh = 0.95))
+```
+
+###Model Training
+Train three different models on the training set.
+
+1) Random Forest
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE,cache=TRUE} 
+modFitRF<-train(classe~., data=training,method="rf",preProcess="pca",trainControl=fitControl)
+```
+2) Support Vector Machine
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE,cache=TRUE} 
+modFitSVM<-train(classe~., data=training,method="svmRadial",preProcess="pca",trainControl=fitControl)
+```
+3) Stochastic Gradient Boosting
+```{r echo=TRUE, warning=FALSE, results="hide", message=FALSE,cache=TRUE} 
+modFitGBM<-train(classe~., data=training,method="gbm",verbose=FALSE)
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+##Compare Accuracy
+
+Random Forest Accuracy:
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+confusionMatrix(predict(modFitRF,test),test$classe)$overall["Accuracy"]
+```
+Support Vector Machine Accuracy:
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+confusionMatrix(predict(modFitSVM,test),test$classe)$overall["Accuracy"]
+```
+Stochastic Gradient Boosting Accuracy:
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+confusionMatrix(predict(modFitGBM,test),test$classe)$overall["Accuracy"]
+```
+
+The results show that random forest has the greatest accuracy and will be used for predicting how well the participants perform the exercise.
+
+###Final Submission Answers
+```{r echo=TRUE, warning=FALSE, message=FALSE, results="hide"}
+answers <- predict(modFitRF,test02)
+write.csv(answers,file="results.csv")
+```
